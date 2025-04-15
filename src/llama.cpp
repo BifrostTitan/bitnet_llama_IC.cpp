@@ -1,3 +1,4 @@
+#include "ic_api.h"
 #include "llama-impl.h"
 #include "llama-vocab.h"
 #include "llama-sampling.h"
@@ -83,11 +84,11 @@
 #include <locale>
 #include <map>
 #include <memory>
-#include <mutex>
+//#include <mutex>
 #include <numeric>
 #include <set>
 #include <sstream>
-#include <thread>
+//#include <thread>
 #include <type_traits>
 #include <unordered_map>
 
@@ -119,7 +120,7 @@ static std::string trim(const std::string & str) {
 static bool is_float_close(float a, float b, float abs_tol) {
     // Check for non-negative tolerance
     if (abs_tol < 0.0) {
-        throw std::invalid_argument("Tolerance must be non-negative");
+        throw IC_API::trap("Tolerance must be non-negative");
     }
 
     // Exact equality check
@@ -1734,7 +1735,7 @@ public:
     llama_file(const char * fname, const char * mode) {
         fp = ggml_fopen(fname, mode);
         if (fp == NULL) {
-            throw std::runtime_error(format("failed to open %s: %s", fname, strerror(errno)));
+            IC_API::trap(format("failed to open %s: %s", fname, strerror(errno)));
         }
         fp_win32 = (HANDLE) _get_osfhandle(_fileno(fp));
         seek(0, SEEK_END);
@@ -1748,7 +1749,7 @@ public:
         li.QuadPart = 0;
         BOOL ret = SetFilePointerEx(fp_win32, li, &li, FILE_CURRENT);
         if (!ret) {
-            throw std::runtime_error(format("read error: %s", GetErrorMessageWin32(GetLastError()).c_str()));
+            IC_API::trap(format("read error: %s", GetErrorMessageWin32(GetLastError()).c_str()));
         }
 
         return li.QuadPart;
@@ -1765,7 +1766,7 @@ public:
         li.QuadPart = offset;
         BOOL ret = SetFilePointerEx(fp_win32, li, NULL, whence);
         if (!ret) {
-            throw std::runtime_error(format("read error: %s", GetErrorMessageWin32(GetLastError()).c_str()));
+            IC_API::trap(format("read error: %s", GetErrorMessageWin32(GetLastError()).c_str()));
         }
     }
 
@@ -1781,10 +1782,10 @@ public:
             DWORD chunk_read = 0;
             BOOL result = ReadFile(fp_win32, reinterpret_cast<char*>(ptr) + bytes_read, chunk_size, &chunk_read, NULL);
             if (!result) {
-                throw std::runtime_error(format("read error: %s", GetErrorMessageWin32(GetLastError()).c_str()));
+                IC_API::trap(format("read error: %s", GetErrorMessageWin32(GetLastError()).c_str()));
             }
             if (chunk_read < chunk_size || chunk_read == 0) {
-                throw std::runtime_error("unexpectedly reached end of file");
+                IC_API::trap("unexpectedly reached end of file");
             }
 
             bytes_read += chunk_read;
@@ -1806,10 +1807,10 @@ public:
             DWORD chunk_written = 0;
             BOOL result = WriteFile(fp_win32, reinterpret_cast<char const*>(ptr) + bytes_written, chunk_size, &chunk_written, NULL);
             if (!result) {
-                throw std::runtime_error(format("write error: %s", GetErrorMessageWin32(GetLastError()).c_str()));
+                IC_API::trap(format("write error: %s", GetErrorMessageWin32(GetLastError()).c_str()));
             }
             if (chunk_written < chunk_size || chunk_written == 0) {
-                throw std::runtime_error("unexpectedly failed to write bytes");
+                IC_API::trap("unexpectedly failed to write bytes");
             }
 
             bytes_written += chunk_written;
@@ -1833,7 +1834,7 @@ public:
     llama_file(const char * fname, const char * mode) {
         fp = ggml_fopen(fname, mode);
         if (fp == NULL) {
-            throw std::runtime_error(format("failed to open %s: %s", fname, strerror(errno)));
+            IC_API::trap(format("failed to open %s: %s", fname, strerror(errno)));
         }
         seek(0, SEEK_END);
         size = tell();
@@ -1847,7 +1848,7 @@ public:
         long ret = std::ftell(fp);
 #endif
         if (ret == -1) {
-            throw std::runtime_error(format("ftell error: %s", strerror(errno)));
+            IC_API::trap(format("ftell error: %s", strerror(errno)));
         }
 
         return (size_t) ret;
@@ -1860,7 +1861,7 @@ public:
         int ret = std::fseek(fp, (long) offset, whence);
 #endif
         if (ret != 0) {
-            throw std::runtime_error(format("seek error: %s", strerror(errno)));
+            IC_API::trap(format("seek error: %s", strerror(errno)));
         }
     }
 
@@ -1871,10 +1872,10 @@ public:
         errno = 0;
         std::size_t ret = std::fread(ptr, len, 1, fp);
         if (ferror(fp)) {
-            throw std::runtime_error(format("read error: %s", strerror(errno)));
+            IC_API::trap(format("read error: %s", strerror(errno)));
         }
         if (ret != 1) {
-            throw std::runtime_error("unexpectedly reached end of file");
+            IC_API::trap("unexpectedly reached end of file");
         }
     }
 
@@ -1891,7 +1892,7 @@ public:
         errno = 0;
         size_t ret = std::fwrite(ptr, len, 1, fp);
         if (ret != 1) {
-            throw std::runtime_error(format("write error: %s", strerror(errno)));
+            IC_API::trap(format("write error: %s", strerror(errno)));
         }
     }
 
@@ -1936,7 +1937,7 @@ struct llama_mmap {
 #endif
         addr = mmap(NULL, file->size, PROT_READ, flags, fd, 0);
         if (addr == MAP_FAILED) { // NOLINT
-            throw std::runtime_error(format("mmap failed: %s", strerror(errno)));
+            IC_API::trap(format("mmap failed: %s", strerror(errno)));
         }
 
         if (prefetch > 0) {
@@ -2040,7 +2041,7 @@ struct llama_mmap {
 
         if (hMapping == NULL) {
             DWORD error = GetLastError();
-            throw std::runtime_error(format("CreateFileMappingA failed: %s", llama_format_win_err(error).c_str()));
+            IC_API::trap(format("CreateFileMappingA failed: %s", llama_format_win_err(error).c_str()));
         }
 
         addr = MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, 0);
@@ -2048,7 +2049,7 @@ struct llama_mmap {
         CloseHandle(hMapping);
 
         if (addr == NULL) {
-            throw std::runtime_error(format("MapViewOfFile failed: %s", llama_format_win_err(error).c_str()));
+            IC_API::trap(format("MapViewOfFile failed: %s", llama_format_win_err(error).c_str()));
         }
 
         if (prefetch > 0) {
@@ -2071,7 +2072,7 @@ struct llama_mmap {
                 }
             }
 #else
-            throw std::runtime_error("PrefetchVirtualMemory unavailable");
+            IC_API::trap("PrefetchVirtualMemory unavailable");
 #endif
         }
     }
@@ -2096,14 +2097,14 @@ struct llama_mmap {
         GGML_UNUSED(prefetch);
         GGML_UNUSED(numa);
 
-        throw std::runtime_error("mmap not supported");
+        IC_API::trap("mmap not supported");
     }
 
     void unmap_fragment(size_t first, size_t last) {
         GGML_UNUSED(first);
         GGML_UNUSED(last);
 
-        throw std::runtime_error("mmap not supported");
+        IC_API::trap("mmap not supported");
     }
 #endif
 };
@@ -4251,7 +4252,7 @@ namespace GGUFMeta {
             const enum gguf_type kt = gguf_get_kv_type(ctx, k);
 
             if (kt != GKV::gt) {
-                throw std::runtime_error(format("key %s has wrong type %s but expected type %s",
+                IC_API::trap(format("key %s has wrong type %s but expected type %s",
                     gguf_get_key(ctx, k), gguf_type_name(kt), gguf_type_name(GKV::gt)));
             }
             return GKV::getter(ctx, k);
@@ -4287,7 +4288,7 @@ namespace GGUFMeta {
                     } break;
                     default:
                         // Shouldn't be possible to end up here, but just in case...
-                        throw std::runtime_error(
+                        IC_API::trap(
                             format("Unsupported attempt to override %s type for metadata key %s\n",
                                 override_type_to_str(ovrd->tag), ovrd->key));
                 }
@@ -4392,7 +4393,7 @@ struct llama_model_loader {
             offs = gguf_get_data_offset(gguf_ctx) + gguf_get_tensor_offset(gguf_ctx, tensor_idx);
 
             if (offs + ggml_nbytes(tensor) < offs || offs + ggml_nbytes(tensor) > file->size) {
-                throw std::runtime_error(format("tensor '%s' data is not within the file bounds, model is corrupted or incomplete", name));
+                IC_API::trap(format("tensor '%s' data is not within the file bounds, model is corrupted or incomplete", name));
             }
         }
     };
@@ -4408,9 +4409,9 @@ struct llama_model_loader {
 
     llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p) {
         int trace = 0;
-        if (getenv("LLAMA_TRACE")) {
+       /* if (getenv("LLAMA_TRACE")) {
             trace = atoi(getenv("LLAMA_TRACE"));
-        }
+        }*/
 
         if (param_overrides_p != nullptr) {
             for (const struct llama_model_kv_override * p = param_overrides_p; p->key[0] != 0; p++) {
@@ -4426,7 +4427,7 @@ struct llama_model_loader {
 
         meta = gguf_init_from_file(fname.c_str(), params);
         if (!meta) {
-            throw std::runtime_error(format("%s: failed to load model from %s\n", __func__, fname.c_str()));
+            IC_API::trap(format("%s: failed to load model from %s\n", __func__, fname.c_str()));
         }
 
         get_key(llm_kv(LLM_KV_GENERAL_ARCHITECTURE), arch_name, false);
@@ -4449,12 +4450,12 @@ struct llama_model_loader {
             uint16_t idx = 0;
             get_key(llm_kv(LLM_KV_SPLIT_NO), idx);
             if (idx != 0) {
-                throw std::runtime_error(format("illegal split file: %d, model must be loaded with the first split", idx));
+                IC_API::trap(format("illegal split file: %d, model must be loaded with the first split", idx));
             }
 
             char split_prefix[PATH_MAX] = {0};
             if (!llama_split_prefix(split_prefix, sizeof(split_prefix), fname.c_str(), idx, n_split)) {
-                throw std::runtime_error(format("invalid split file: %s", fname.c_str()));
+                IC_API::trap(format("invalid split file: %s", fname.c_str()));
             }
 
             if (trace > 0) {
@@ -4471,7 +4472,7 @@ struct llama_model_loader {
                 };
                 struct gguf_context * ctx_gguf = gguf_init_from_file(split_path, split_params);
                 if (!ctx_gguf) {
-                    throw std::runtime_error(format("%s: failed to load GGUF split from %s\n", __func__, split_path));
+                    IC_API::trap(format("%s: failed to load GGUF split from %s\n", __func__, split_path));
                 }
 
                 files.emplace_back(new llama_file(split_path, "rb"));
@@ -4491,7 +4492,7 @@ struct llama_model_loader {
             {
                 const int n_tensors_loaded = (int) weights.size();
                 if (n_tensors != n_tensors_loaded) {
-                    throw std::runtime_error(format("corrupted model: %d tensors expected but %d found", n_tensors, n_tensors_loaded));
+                    IC_API::trap(format("corrupted model: %d tensors expected but %d found", n_tensors, n_tensors_loaded));
                 }
             }
 
@@ -4511,7 +4512,7 @@ struct llama_model_loader {
             const std::string name(w.tensor->name);
             auto found = tensor_names.find(name);
             if (found != tensor_names.end()) {
-                throw std::runtime_error(format("invalid model: tensor '%s' is duplicated", w.tensor->name));
+                IC_API::trap(format("invalid model: tensor '%s' is duplicated", w.tensor->name));
             }
             tensor_names.insert(name);
         }
@@ -4647,7 +4648,7 @@ struct llama_model_loader {
 
         if (kid < 0) {
             if (required) {
-                throw std::runtime_error(format("key not found in model: %s", key.c_str()));
+                IC_API::trap(format("key not found in model: %s", key.c_str()));
             }
             return false;
         }
@@ -4672,7 +4673,7 @@ struct llama_model_loader {
 
         if (kid < 0 || gguf_get_kv_type(meta, kid) != GGUF_TYPE_ARRAY) {
             if (required) {
-                throw std::runtime_error(format("array key not found in model: %s", key.c_str()));
+                IC_API::trap(format("array key not found in model: %s", key.c_str()));
             }
             return false;
         }
@@ -4686,7 +4687,7 @@ struct llama_model_loader {
                                             (std::is_same<T,  int32_t>::value) ||
                                             (std::is_same<T, uint32_t>::value));  break;
             default:
-                throw std::runtime_error(format("%s is not a float32, int32 array", key.c_str()));
+                IC_API::trap(format("%s is not a float32, int32 array", key.c_str()));
         }
 
         result.resize(arr_info.length);
@@ -4701,7 +4702,7 @@ struct llama_model_loader {
 
         if (kid < 0 || gguf_get_kv_type(meta, kid) != GGUF_TYPE_ARRAY) {
             if (required) {
-                throw std::runtime_error(format("array key not found in model: %s", key.c_str()));
+                IC_API::trap(format("array key not found in model: %s", key.c_str()));
             }
             return false;
         }
@@ -4715,11 +4716,11 @@ struct llama_model_loader {
                                             (std::is_same<T,  int32_t>::value) ||
                                             (std::is_same<T, uint32_t>::value));  break;
             default:
-                throw std::runtime_error(format("%s is not a float32, int32 array", key.c_str()));
+                IC_API::trap(format("%s is not a float32, int32 array", key.c_str()));
         }
 
         if (arr_info.length > N_MAX) {
-            throw std::runtime_error(format("array length %u for key %s exceeds max %u", (uint32_t) arr_info.length, key.c_str(), (uint32_t) N_MAX));
+            IC_API::trap(format("array length %u for key %s exceeds max %u", (uint32_t) arr_info.length, key.c_str(), (uint32_t) N_MAX));
         }
 
         std::copy((const T*)arr_info.data, (const T *)arr_info.data + arr_info.length, result.begin());
@@ -4742,7 +4743,7 @@ struct llama_model_loader {
         const bool found = GGUFMeta::GKV<T>::set(meta, key, result, override);
 
         if (required && !found) {
-            throw std::runtime_error(format("key not found in model: %s", key.c_str()));
+            IC_API::trap(format("key not found in model: %s", key.c_str()));
         }
 
         return found;
@@ -4760,13 +4761,13 @@ struct llama_model_loader {
 
         if (kid < 0) {
             if (required) {
-                throw std::runtime_error(format("key not found in model: %s", key.c_str()));
+                IC_API::trap(format("key not found in model: %s", key.c_str()));
             }
             return false;
         }
 
         if (n > N_MAX) {
-            throw std::runtime_error(format("n > N_MAX: %u > %u for key %s", (uint32_t) n, (uint32_t) N_MAX, key.c_str()));
+            IC_API::trap(format("n > N_MAX: %u > %u for key %s", (uint32_t) n, (uint32_t) N_MAX, key.c_str()));
         }
 
         if (gguf_get_kv_type(meta, kid) == GGUF_TYPE_ARRAY) {
@@ -4774,7 +4775,7 @@ struct llama_model_loader {
                 GGUFMeta::GKV<GGUFMeta::ArrayInfo>::get_kv(meta, kid);
 
             if (n != arr_info.length) {
-                throw std::runtime_error(format("key %s has wrong array length; expected %u, got %u", key.c_str(), n, (uint32_t) arr_info.length));
+                IC_API::trap(format("key %s has wrong array length; expected %u, got %u", key.c_str(), n, (uint32_t) arr_info.length));
             }
 
             return get_arr(key, result, required);
@@ -4827,7 +4828,7 @@ struct llama_model_loader {
     const llama_tensor_weight & require_weight(const char * name) const {
         const llama_tensor_weight * weight = get_weight(name);
         if (!weight) {
-            throw std::runtime_error(format("%s: tensor '%s' not found", __func__, name));
+            IC_API::trap(format("%s: tensor '%s' not found", __func__, name));
         }
         return *weight;
     }
@@ -4843,7 +4844,7 @@ struct llama_model_loader {
     struct ggml_tensor * require_tensor_meta(const char * name) const {
         struct ggml_tensor * tensor = get_tensor_meta(name);
         if (!tensor) {
-            throw std::runtime_error(format("%s: tensor '%s' not found", __func__, name));
+            IC_API::trap(format("%s: tensor '%s' not found", __func__, name));
         }
         return tensor;
     }
@@ -4872,7 +4873,7 @@ struct llama_model_loader {
             if (!required) {
                 return NULL;
             }
-            throw std::runtime_error(format("%s: tensor '%s' not found", __func__, name.c_str()));
+            IC_API::trap(format("%s: tensor '%s' not found", __func__, name.c_str()));
         }
 
         {
@@ -4884,7 +4885,7 @@ struct llama_model_loader {
                 }
             }
             if (!is_ok) {
-                throw std::runtime_error(
+                IC_API::trap(
                         format("%s: tensor '%s' has wrong shape; expected %s, got %s",
                             __func__, name.c_str(),
                             llama_format_tensor_shape(ne).c_str(),
@@ -4916,7 +4917,7 @@ struct llama_model_loader {
         }
 
         if (cur->type != base->type) {
-            throw std::runtime_error(format("%s: tensor '%s' has wrong type; expected %s, got %s", __func__, name.c_str(), ggml_type_name(base->type), ggml_type_name(cur->type)));
+            IC_API::trap(format("%s: tensor '%s' has wrong type; expected %s, got %s", __func__, name.c_str(), ggml_type_name(base->type), ggml_type_name(cur->type)));
         }
 
         std::array<int64_t, GGML_MAX_DIMS> dims;
@@ -4938,7 +4939,7 @@ struct llama_model_loader {
 
     void done_getting_tensors() const {
         if (n_created != n_tensors) {
-            throw std::runtime_error(format("%s: wrong number of tensors; expected %d, got %d", __func__, n_tensors, n_created));
+            IC_API::trap(format("%s: wrong number of tensors; expected %d, got %d", __func__, n_tensors, n_created));
         }
     }
 
@@ -4972,7 +4973,7 @@ struct llama_model_loader {
         *last  = 0;
         *addr = mapping->addr;
         for (ggml_tensor * tensor = ggml_get_first_tensor(ctx); tensor; tensor = ggml_get_next_tensor(ctx, tensor)) {
-            try {
+           // try {
                 const auto * weight = get_weight(ggml_get_name(tensor));
                 if (!weight) {
                     continue;
@@ -4982,9 +4983,9 @@ struct llama_model_loader {
                 }
                 *first = std::min(*first, weight->offs);
                 *last  = std::max(*last,  weight->offs + ggml_nbytes(tensor));
-            } catch(...) {
+           /* } catch (...) {
                 // the tensor is not in the model
-            }
+            }*/
         }
     }
 
@@ -5008,7 +5009,7 @@ struct llama_model_loader {
         }
 
         if (check_tensors && !ggml_validate_row_data(cur->type, cur->data, ggml_nbytes(cur))) {
-            throw std::runtime_error(format("tensor '%s' has invalid data", ggml_get_name(cur)));
+            IC_API::trap(format("tensor '%s' has invalid data", ggml_get_name(cur)));
         }
     }
 
@@ -5026,7 +5027,7 @@ struct llama_model_loader {
         GGML_ASSERT(size_data != 0 && "call init_mappings() first");
 
         std::vector<no_init<uint8_t>> read_buf;
-        std::vector<std::future<std::pair<ggml_tensor *, bool>>> validation_result;
+        //std::vector<std::future<std::pair<ggml_tensor *, bool>>> validation_result;
 
         // 4 staging buffers for async uploads, each sized 1MB seems to be a good default for single NVMe drives.
         // NVMe raid configurations might require more / larger buffers.
@@ -5139,13 +5140,13 @@ struct llama_model_loader {
                     buf_mmap = bufs.at(weight->idx);
                 }
                 uint8_t * data = (uint8_t *) mapping->addr + weight->offs;
-
+/*
                 if (check_tensors) {
                     validation_result.emplace_back(std::async(std::launch::async, [cur, data, n_size] {
                         return std::make_pair(cur, ggml_validate_row_data(cur->type, data, n_size));
                     }));
                 }
-
+*/
                 GGML_ASSERT(buf_mmap || cur->data); // either we have a buffer to allocate the tensor in, or it is already allocated
                 if (buf_mmap && cur->data == nullptr) {
                     ggml_backend_tensor_alloc(buf_mmap, cur, data);
@@ -5166,11 +5167,11 @@ struct llama_model_loader {
                 if (ggml_backend_buffer_is_host(cur->buffer)) {
                     file->seek(weight->offs, SEEK_SET);
                     file->read_raw(cur->data, n_size);
-                    if (check_tensors) {
+                    /*if (check_tensors) {
                         validation_result.emplace_back(std::async(std::launch::async, [cur, n_size] {
                             return std::make_pair(cur, ggml_validate_row_data(cur->type, cur->data, n_size));
                         }));
-                    }
+                    }*/
                 } else {
                     // If upload_backend is valid load the tensor in chunks to pinned memory and upload the buffers asynchronously to the GPU.
                     if (upload_backend) {
@@ -5196,7 +5197,7 @@ struct llama_model_loader {
                         file->read_raw(read_buf.data(), n_size);
                         ggml_backend_tensor_set(cur, read_buf.data(), 0, n_size);
                         if (check_tensors && !ggml_validate_row_data(cur->type, read_buf.data(), n_size)) {
-                            throw std::runtime_error(format("tensor '%s' has invalid data", ggml_get_name(cur)));
+                            IC_API::trap(format("tensor '%s' has invalid data", ggml_get_name(cur)));
                         }
                     }
                 }
@@ -5228,7 +5229,7 @@ struct llama_model_loader {
             }
         }
         if (validation_failed) {
-            throw std::runtime_error("found tensors with invalid data");
+            IC_API::trap("found tensors with invalid data");
         }
 
         // check if this is the last call and do final cleanup
@@ -5410,7 +5411,7 @@ static const char * llama_model_vocab_type_name(enum llama_vocab_type type){
 static void llm_load_arch(llama_model_loader & ml, llama_model & model) {
     model.arch = ml.get_arch();
     if (model.arch == LLM_ARCH_UNKNOWN) {
-        throw std::runtime_error("unknown model architecture: '" + ml.get_arch_name() + "'");
+        IC_API::trap("unknown model architecture: '" + ml.get_arch_name() + "'");
     }
 }
 
@@ -5513,7 +5514,7 @@ static void llm_load_hparams(
 
         if (model.arch == LLM_ARCH_LLAMA || model.arch == LLM_ARCH_FALCON) {
             if (hparams.n_rot != hparams.n_embd_head_k) {
-                throw std::runtime_error(format("invalid n_rot: %u, expected %u", hparams.n_rot, hparams.n_embd_head_k));
+                IC_API::trap(format("invalid n_rot: %u, expected %u", hparams.n_rot, hparams.n_embd_head_k));
             }
         }
     } else {
@@ -5777,7 +5778,7 @@ static void llm_load_hparams(
                 }
                 bool found_swa = ml.get_key(LLM_KV_ATTENTION_SLIDING_WINDOW, hparams.n_swa, false);
                 if (!found_swa && hparams.n_swa == 0) {
-                    throw std::runtime_error("invalid value for sliding_window");
+                    IC_API::trap("invalid value for sliding_window");
                 }
             } break;
         case LLM_ARCH_PLAMO:
@@ -6247,7 +6248,7 @@ static void llm_load_vocab(
             // read bpe merges and populate bpe ranks
             const int merges_keyidx = gguf_find_key(ctx, kv(LLM_KV_TOKENIZER_MERGES).c_str());
             if (merges_keyidx == -1) {
-                throw std::runtime_error("cannot find tokenizer merges in model file\n");
+                IC_API::trap("cannot find tokenizer merges in model file\n");
             }
 
             const int n_merges = gguf_get_arr_n(ctx, merges_keyidx);
@@ -6315,7 +6316,7 @@ static void llm_load_vocab(
             vocab.special_sep_id = LLAMA_TOKEN_NULL;
             vocab.special_pad_id = LLAMA_TOKEN_NULL;
         } else {
-            throw std::runtime_error(format("unknown tokenizer: '%s'", tokenizer_model.c_str()));
+            IC_API::trap(format("unknown tokenizer: '%s'", tokenizer_model.c_str()));
         }
 
         // for now, only BPE models have pre-tokenizers
@@ -6436,7 +6437,7 @@ static void llm_load_vocab(
                 vocab.tokenizer_add_bos = true;
                 vocab.tokenizer_clean_spaces = false;
             } else {
-                throw std::runtime_error(format("unknown pre-tokenizer type: '%s'", tokenizer_pre.c_str()));
+                IC_API::trap(format("unknown pre-tokenizer type: '%s'", tokenizer_pre.c_str()));
             }
         } else if (vocab.type == LLAMA_VOCAB_TYPE_SPM) {
             vocab.type_pre = LLAMA_VOCAB_PRE_TYPE_DEFAULT;
@@ -6470,7 +6471,7 @@ static void llm_load_vocab(
 
     const int token_idx = gguf_find_key(ctx, kv(LLM_KV_TOKENIZER_LIST).c_str());
     if (token_idx == -1) {
-        throw std::runtime_error("cannot find tokenizer vocab in model file\n");
+        IC_API::trap("cannot find tokenizer vocab in model file\n");
     }
 
     const float * scores = nullptr;
@@ -6526,12 +6527,12 @@ static void llm_load_vocab(
 
     // determine the newline token: LLaMA "<0x0A>" == 10 == '\n', Falcon 193 == '\n'
     if (vocab.type == LLAMA_VOCAB_TYPE_SPM) {
-        try {
+        //try {
             vocab.linefeed_id = llama_byte_to_token_impl(vocab, '\n');
-        } catch (const std::exception & e) {
+       /* } catch (const std::exception& e) {
             LLAMA_LOG_WARN("%s: SPM vocabulary, but newline token not found: %s! Using special_pad_id instead.", __func__, e.what());
             vocab.linefeed_id = vocab.special_pad_id;
-        }
+        }*/
     } else if (vocab.type == LLAMA_VOCAB_TYPE_WPM) {
         vocab.linefeed_id = vocab.special_pad_id;
     } else if (vocab.type == LLAMA_VOCAB_TYPE_RWKV) {
@@ -7052,7 +7053,7 @@ static bool llm_load_tensors(
     if (llama_get_device_count(model) > 0 &&
         split_mode != LLAMA_SPLIT_MODE_LAYER &&
         (main_gpu < 0 || main_gpu >= llama_get_device_count(model))) {
-        throw std::runtime_error(format("invalid value for main_gpu: %d (available devices: %d)", main_gpu, llama_get_device_count(model)));
+        IC_API::trap(format("invalid value for main_gpu: %d (available devices: %d)", main_gpu, llama_get_device_count(model)));
     }
 
     model.split_mode   = split_mode;
@@ -7163,7 +7164,7 @@ static bool llm_load_tensors(
         };
         ggml_context * ctx = ggml_init(params);
         if (!ctx) {
-            throw std::runtime_error(format("failed to create context"));
+            IC_API::trap(format("failed to create context"));
         }
         ctx_map[it.first] = ctx;
         model.ctxs.push_back(ctx);
@@ -7191,7 +7192,7 @@ static bool llm_load_tensors(
         const int64_t n_ctx_train   = hparams.n_ctx_train;
 
         if (n_expert > 0 && hparams.n_expert_used == 0) {
-            throw std::runtime_error("model has expert layers but no expert layers are used");
+            IC_API::trap("model has expert layers but no expert layers are used");
         }
 
         ggml_context * ctx_input        = ctx_map.at(model.buft_input.buft);
@@ -7341,7 +7342,7 @@ static bool llm_load_tensors(
             case LLM_ARCH_GROK:
                 {
                     if (n_expert == 0) {
-                        throw std::runtime_error("Grok model cannot have zero experts");
+                        IC_API::trap("Grok model cannot have zero experts");
                     }
 
                     model.tok_embd = ml.create_tensor(ctx_input, tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab});
@@ -7411,7 +7412,7 @@ static bool llm_load_tensors(
             case LLM_ARCH_DBRX:
             {
                 if (n_expert == 0) {
-                    throw std::runtime_error("DBRX model cannot have zero experts");
+                    IC_API::trap("DBRX model cannot have zero experts");
                 }
 
                 model.tok_embd = ml.create_tensor(ctx_input, tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab});
@@ -8980,7 +8981,7 @@ static bool llm_load_tensors(
                     }
                 } break;
             default:
-                throw std::runtime_error("unknown architecture");
+                IC_API::trap("unknown architecture");
         }
     }
 
@@ -9028,7 +9029,7 @@ static bool llm_load_tensors(
                 const size_t max_size = ggml_get_max_tensor_size(ctx);
                 ggml_backend_buffer_t buf = ggml_backend_dev_buffer_from_host_ptr(dev, (char *) addr + first, last - first, max_size);
                 if (buf == nullptr) {
-                    throw std::runtime_error(format("unable to allocate %s buffer", ggml_backend_buft_name(buft)));
+                    IC_API::trap(format("unable to allocate %s buffer", ggml_backend_buft_name(buft)));
                 }
                 model.bufs.push_back(buf);
                 bufs.emplace(idx, buf);
@@ -9037,7 +9038,7 @@ static bool llm_load_tensors(
         else {
             ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft);
             if (buf == nullptr) {
-                throw std::runtime_error(format("unable to allocate %s buffer", ggml_backend_buft_name(buft)));
+                IC_API::trap(format("unable to allocate %s buffer", ggml_backend_buft_name(buft)));
             }
             model.bufs.push_back(buf);
             if (use_mlock && ggml_backend_buffer_is_host(buf)) {
@@ -9052,7 +9053,7 @@ static bool llm_load_tensors(
         }
 
         if (bufs.empty()) {
-            throw std::runtime_error("failed to allocate buffer");
+            IC_API::trap("failed to allocate buffer");
         }
 
         for (auto & buf : bufs) {
@@ -9112,32 +9113,24 @@ static bool llm_load_tensors(
 static int llama_model_load(const std::string & fname, llama_model & model, llama_model_params & params) {
     model.t_start_us = ggml_time_us();
 
-    try {
+
         llama_model_loader ml(fname, params.use_mmap, params.check_tensors, params.kv_overrides);
 
         model.hparams.vocab_only = params.vocab_only;
 
-        try {
             llm_load_arch(ml, model);
-        } catch(const std::exception & e) {
-            throw std::runtime_error("error loading model architecture: " + std::string(e.what()));
-        }
-        try {
+      
             llm_load_hparams(ml, model);
-        } catch(const std::exception & e) {
-            throw std::runtime_error("error loading model hyperparameters: " + std::string(e.what()));
-        }
-        try {
+    
+     
             llm_load_vocab(ml, model);
-        } catch(const std::exception & e) {
-            throw std::runtime_error("error loading model vocabulary: " + std::string(e.what()));
-        }
+      
 
         llm_load_print_meta(ml, model);
 
         if (model.vocab.type != LLAMA_VOCAB_TYPE_NONE &&
             model.hparams.n_vocab != model.vocab.id_to_token.size()) {
-            throw std::runtime_error("vocab size mismatch");
+            IC_API::trap("vocab size mismatch");
         }
 
         if (params.vocab_only) {
@@ -9168,10 +9161,10 @@ static int llama_model_load(const std::string & fname, llama_model & model, llam
         )) {
             return -2;
         }
-    } catch (const std::exception & err) {
+   /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: error loading model: %s\n", __func__, err.what());
         return -1;
-    }
+    }*/
 
     // loading time will be recalculate after the first eval, so
     // we take page faults deferred by mmap() into consideration
@@ -17977,11 +17970,11 @@ static void llama_tensor_dequantize_internal(
     const ggml_type_traits * qtype = ggml_get_type_traits(tensor->type);
     if (ggml_is_quantized(tensor->type)) {
         if (qtype->to_float == NULL) {
-            throw std::runtime_error(format("type %s unsupported for integer quantization: no dequantization available", ggml_type_name(tensor->type)));
+            IC_API::trap(format("type %s unsupported for integer quantization: no dequantization available", ggml_type_name(tensor->type)));
         }
     } else if (tensor->type != GGML_TYPE_F16 &&
                tensor->type != GGML_TYPE_BF16) {
-        throw std::runtime_error(format("cannot dequantize/convert tensor type %s", ggml_type_name(tensor->type)));
+        IC_API::trap(format("cannot dequantize/convert tensor type %s", ggml_type_name(tensor->type)));
     }
 
     if (nthread < 2) {
@@ -18055,10 +18048,10 @@ static ggml_type llama_tensor_get_type(quantize_state_internal & qs, ggml_type n
             // for getting the current layer as I initially thought, and we need to resort to parsing the
             // tensor name.
             if (sscanf(name, "blk.%d.", &i_layer) != 1) {
-                throw std::runtime_error(format("Failed to determine layer for tensor %s", name));
+                IC_API::trap(format("Failed to determine layer for tensor %s", name));
             }
             if (i_layer < 0 || i_layer >= n_layer) {
-                throw std::runtime_error(format("Bad layer %d for tensor %s. Must be in [0, %d)", i_layer, name, n_layer));
+                IC_API::trap(format("Bad layer %d for tensor %s. Must be in [0, %d)", i_layer, name, n_layer));
             }
         }
         return std::make_pair(i_layer, n_layer);
@@ -18321,7 +18314,7 @@ static ggml_type llama_tensor_get_type(quantize_state_internal & qs, ggml_type n
             case GGML_TYPE_Q4_K:   new_type = GGML_TYPE_Q5_0;   break;
             case GGML_TYPE_Q5_K:   new_type = GGML_TYPE_Q5_1;   break;
             case GGML_TYPE_Q6_K:   new_type = GGML_TYPE_Q8_0;   break;
-            default: throw std::runtime_error("\nUnsupported tensor size encountered\n");
+            default: IC_API::trap("\nUnsupported tensor size encountered\n");
         }
         if (tensor->ne[0] % ggml_blck_size(new_type) != 0) {
             new_type = GGML_TYPE_F16;
@@ -18338,7 +18331,7 @@ static size_t llama_tensor_quantize_internal(enum ggml_type new_type, const floa
         // single-thread
         size_t new_size = ggml_quantize_chunk(new_type, f32_data, new_data, 0, nrows, n_per_row, imatrix);
         if (!ggml_validate_row_data(new_type, new_data, new_size)) {
-            throw std::runtime_error("quantized data validation failed");
+            IC_API::trap("quantized data validation failed");
         }
         return new_size;
     }
@@ -18382,7 +18375,7 @@ static size_t llama_tensor_quantize_internal(enum ggml_type new_type, const floa
     for (auto & w : workers) { w.join(); }
     workers.clear();
     if (!valid) {
-        throw std::runtime_error("quantized data validation failed");
+        IC_API::trap("quantized data validation failed");
     }
     return new_size;
 }
@@ -18433,7 +18426,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
         case LLAMA_FTYPE_MOSTLY_Q4_0_4_8: default_type = GGML_TYPE_Q4_0_4_8; break;
         case LLAMA_FTYPE_MOSTLY_Q4_0_8_8: default_type = GGML_TYPE_Q4_0_8_8; break;
 
-        default: throw std::runtime_error(format("invalid output file type %d\n", ftype));
+        default: IC_API::trap(format("invalid output file type %d\n", ftype));
     }
 
     int nthread = params->nthread;
@@ -18477,7 +18470,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
             for (const auto & kv : *imatrix_data) {
                 for (float f : kv.second) {
                     if (!std::isfinite(f)) {
-                        throw std::runtime_error(format("imatrix contains non-finite value %f\n", f));
+                        IC_API::trap(format("imatrix contains non-finite value %f\n", f));
                     }
                 }
             }
@@ -18727,7 +18720,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
                         // since many people will miss the error and not realize that most of the model is being quantized without an imatrix
                         // tok_embd should be ignored in this case, since it always causes this warning
                         if (name != tn(LLM_TENSOR_TOKEN_EMBD, "weight")) {
-                            throw std::runtime_error(format("imatrix size %d is different from tensor size %d for %s",
+                            IC_API::trap(format("imatrix size %d is different from tensor size %d for %s",
                                     int(it->second.size()), int(tensor->ne[0]*tensor->ne[2]), tensor->name));
                         }
                     }
@@ -18743,7 +18736,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
                 LLAMA_LOG_ERROR("Missing importance matrix for tensor %s in a very low-bit quantization\n", tensor->name);
                 LLAMA_LOG_ERROR("The result will be garbage, so bailing out\n");
                 LLAMA_LOG_ERROR("============================================================\n\n");
-                throw std::runtime_error(format("Missing importance matrix for tensor %s in a very low-bit quantization", tensor->name));
+                IC_API::trap(format("Missing importance matrix for tensor %s in a very low-bit quantization", tensor->name));
             }
 
             float * f32_data;
@@ -18751,7 +18744,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
             if (tensor->type == GGML_TYPE_F32) {
                 f32_data = (float *) tensor->data;
             } else if (ggml_is_quantized(tensor->type) && !params->allow_requantize) {
-                throw std::runtime_error(format("requantizing from type %s is disabled", ggml_type_name(tensor->type)));
+                IC_API::trap(format("requantizing from type %s is disabled", ggml_type_name(tensor->type)));
             } else {
                 llama_tensor_dequantize_internal(tensor, f32_conv_buf, workers, nelements, nthread);
                 f32_data = (float *) f32_conv_buf.data();
@@ -18830,7 +18823,7 @@ static void llama_lora_adapter_init_internal(struct llama_model * model, const c
     };
     struct gguf_context * ctx_gguf = gguf_init_from_file(path_lora, meta_gguf_params);
     if (!ctx_gguf) {
-        throw std::runtime_error("failed to load lora adapter file from " + std::string(path_lora));
+        IC_API::trap("failed to load lora adapter file from " + std::string(path_lora));
     }
 
     // check metadata
@@ -18848,20 +18841,20 @@ static void llama_lora_adapter_init_internal(struct llama_model * model, const c
         auto general_type = get_kv_str(llm_kv(LLM_KV_GENERAL_TYPE));
         if (general_type != "adapter") {
             gguf_free(ctx_gguf);
-            throw std::runtime_error("expect general.type to be 'adapter', but got: " + general_type);
+            IC_API::trap("expect general.type to be 'adapter', but got: " + general_type);
         }
 
         auto general_arch_str = get_kv_str(llm_kv(LLM_KV_GENERAL_ARCHITECTURE));
         auto general_arch = llm_arch_from_string(general_arch_str);
         if (general_arch != model->arch) {
             gguf_free(ctx_gguf);
-            throw std::runtime_error("model arch and LoRA arch mismatch");
+            IC_API::trap("model arch and LoRA arch mismatch");
         }
 
         auto adapter_type = get_kv_str(llm_kv(LLM_KV_ADAPTER_TYPE));
         if (adapter_type != "lora") {
             gguf_free(ctx_gguf);
-            throw std::runtime_error("expect adapter.type to be 'lora', but got: " + adapter_type);
+            IC_API::trap("expect adapter.type to be 'lora', but got: " + adapter_type);
         }
 
         adapter.alpha = get_kv_f32(llm_kv(LLM_KV_ADAPTER_LORA_ALPHA));
@@ -18911,7 +18904,7 @@ static void llama_lora_adapter_init_internal(struct llama_model * model, const c
         } else {
             gguf_free(ctx_gguf);
             ggml_free(ctx);
-            throw std::runtime_error("LoRA tensor '" + name + "' has unexpected suffix");
+            IC_API::trap("LoRA tensor '" + name + "' has unexpected suffix");
         }
     }
 
@@ -18923,7 +18916,7 @@ static void llama_lora_adapter_init_internal(struct llama_model * model, const c
         if (!w.a || !w.b) {
             gguf_free(ctx_gguf);
             ggml_free(ctx);
-            throw std::runtime_error("LoRA tensor pair for '" + name + "' is missing one component");
+            IC_API::trap("LoRA tensor pair for '" + name + "' is missing one component");
         }
 
         // device buft and device ctx
@@ -18931,19 +18924,19 @@ static void llama_lora_adapter_init_internal(struct llama_model * model, const c
         if (!model_tensor) {
             gguf_free(ctx_gguf);
             ggml_free(ctx);
-            throw std::runtime_error("LoRA tensor '" + name + "' does not exist in base model");
+            IC_API::trap("LoRA tensor '" + name + "' does not exist in base model");
         }
         struct ggml_context * dev_ctx = get_ctx_for_buft(ggml_backend_buffer_get_type(model_tensor->buffer));
         // validate tensor shape
         if (model_tensor->ne[0] != w.a->ne[0] || model_tensor->ne[1] != w.b->ne[1]) {
             gguf_free(ctx_gguf);
             ggml_free(ctx);
-            throw std::runtime_error("tensor '" + name + "' has incorrect shape");
+            IC_API::trap("tensor '" + name + "' has incorrect shape");
         }
         if (w.a->ne[1] != w.b->ne[0]) {
             gguf_free(ctx_gguf);
             ggml_free(ctx);
-            throw std::runtime_error("lora_a tensor is not transposed (hint: adapter from \"finetune\" example is no longer supported)");
+            IC_API::trap("lora_a tensor is not transposed (hint: adapter from \"finetune\" example is no longer supported)");
         }
         // save tensor to adapter
         struct ggml_tensor * tensor_a = ggml_dup_tensor(dev_ctx, w.a);
@@ -18964,7 +18957,7 @@ static void llama_lora_adapter_init_internal(struct llama_model * model, const c
             if (!buf) {
                 gguf_free(ctx_gguf);
                 ggml_free(ctx);
-                throw std::runtime_error("failed to allocate buffer for lora adapter\n");
+                IC_API::trap("failed to allocate buffer for lora adapter\n");
             }
             LLAMA_LOG_INFO("%s: %10s LoRA buffer size = %8.2f MiB\n", __func__, ggml_backend_buffer_name(buf), ggml_backend_buffer_get_size(buf)/1024.0/1024.0);
             adapter.ctxs.push_back(ctx_dev);
@@ -19932,24 +19925,24 @@ uint32_t llama_model_quantize(
         const char * fname_inp,
         const char * fname_out,
         const llama_model_quantize_params * params) {
-    try {
+   // try {
         llama_model_quantize_internal(fname_inp, fname_out, params);
         return 0;
-    } catch (const std::exception & err) {
+   /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: failed to quantize: %s\n", __func__, err.what());
         return 1;
-    }
+   } */
 }
 
 struct llama_lora_adapter * llama_lora_adapter_init(struct llama_model * model, const char * path_lora) {
-    try {
+   // try {
         struct llama_lora_adapter * adapter = new llama_lora_adapter(model);
         llama_lora_adapter_init_internal(model, path_lora, *adapter);
         return adapter;
-    } catch (const std::exception & err) {
+   /*} catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: failed to apply lora adapter: %s\n", __func__, err.what());
         return nullptr;
-    }
+    }*/
 }
 
 static bool llama_control_vector_init(struct llama_control_vector & cvec, const llama_model & model) {
@@ -20462,7 +20455,7 @@ struct llama_data_read {
         std::string arch_str;
         read_string(arch_str);
         if (cur_arch_str != arch_str) {
-            throw std::runtime_error(format("wrong model arch: '%s' instead of '%s'", arch_str.c_str(), cur_arch_str.c_str()));
+            IC_API::trap(format("wrong model arch: '%s' instead of '%s'", arch_str.c_str(), cur_arch_str.c_str()));
         }
         // TODO: add more info which needs to be identical but which is not verified otherwise
     }
@@ -20475,7 +20468,7 @@ struct llama_data_read {
     //    rng_ss >> rng;
 
     //    if (rng_ss.fail()) {
-    //        throw std::runtime_error("failed to load RNG state");
+    //        IC_API::trap("failed to load RNG state");
     //    }
     //}
 
@@ -20486,7 +20479,7 @@ struct llama_data_read {
         read_to(&n_outputs, sizeof(n_outputs));
 
         if (n_outputs > llama_output_reserve(*ctx, n_outputs)) {
-            throw std::runtime_error("could not reserve outputs");
+            IC_API::trap("could not reserve outputs");
         }
 
         if (n_outputs) {
@@ -20496,7 +20489,7 @@ struct llama_data_read {
             for (int32_t i = 0; i < (int32_t) output_pos.size(); ++i) {
                 int32_t id = output_pos[i];
                 if ((uint32_t) id >= ctx->cparams.n_batch) {
-                    throw std::runtime_error(format("invalid output id, %d does not fit in batch size of %u", id, ctx->cparams.n_batch));
+                    IC_API::trap(format("invalid output id, %d does not fit in batch size of %u", id, ctx->cparams.n_batch));
                 }
                 ctx->output_ids[id] = i;
             }
@@ -20510,7 +20503,7 @@ struct llama_data_read {
         read_to(&logits_size, sizeof(logits_size));
 
         if (ctx->logits_size < logits_size) {
-            throw std::runtime_error("logits buffer too small");
+            IC_API::trap("logits buffer too small");
         }
 
         if (logits_size) {
@@ -20523,7 +20516,7 @@ struct llama_data_read {
         read_to(&embeddings_size, sizeof(embeddings_size));
 
         if (ctx->embd_size < embeddings_size) {
-            throw std::runtime_error("embeddings buffer too small");
+            IC_API::trap("embeddings buffer too small");
         }
 
         if (embeddings_size) {
@@ -20761,7 +20754,7 @@ struct llama_data_read {
             } else {
                 llama_kv_cache_seq_rm(ctx, seq_id, -1, -1);
             }
-            throw std::runtime_error("failed to restore kv cache");
+            IC_API::trap("failed to restore kv cache");
         }
     }
 };
@@ -20793,7 +20786,7 @@ struct llama_data_write_buffer : llama_data_write {
 
     void write(const void * src, size_t size) override {
         if (size > buf_size) {
-            throw std::runtime_error("unexpectedly reached end of buffer");
+            IC_API::trap("unexpectedly reached end of buffer");
         }
         memcpy(ptr, src, size);
         ptr += size;
@@ -20803,7 +20796,7 @@ struct llama_data_write_buffer : llama_data_write {
 
     void write_tensor_data(const struct ggml_tensor * tensor, size_t offset, size_t size) override {
         if (size > buf_size) {
-            throw std::runtime_error("unexpectedly reached end of buffer");
+            IC_API::trap("unexpectedly reached end of buffer");
         }
         ggml_backend_tensor_get(tensor, ptr, offset, size);
         ptr += size;
@@ -20826,7 +20819,7 @@ struct llama_data_read_buffer : llama_data_read {
     const uint8_t * read(size_t size) override {
         const uint8_t * base_ptr = ptr;
         if (size > buf_size) {
-            throw std::runtime_error("unexpectedly reached end of buffer");
+            IC_API::trap("unexpectedly reached end of buffer");
         }
         ptr += size;
         size_read += size;
@@ -20919,24 +20912,24 @@ static size_t llama_state_get_data_internal(struct llama_context * ctx, llama_da
 
 size_t llama_state_get_data(struct llama_context * ctx, uint8_t * dst, size_t size) {
     llama_data_write_buffer data_ctx(dst, size);
-    try {
+   // try {
         return llama_state_get_data_internal(ctx, data_ctx);
-    } catch (const std::exception & err) {
+  /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: error saving state: %s\n", __func__, err.what());
         return 0;
-    }
+    }*/
 }
 
 // Returns the *actual* size of the state.
 // Intended to be used when saving to state to a buffer.
 size_t llama_state_get_size(struct llama_context * ctx) {
     llama_data_write_dummy data_ctx;
-    try {
+    //try {
         return llama_state_get_data_internal(ctx, data_ctx);
-    } catch (const std::exception & err) {
+    /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: error getting state size: %s\n", __func__, err.what());
         return 0;
-    }
+    }*/
 }
 
 static size_t llama_state_set_data_internal(struct llama_context * ctx, llama_data_read & data_ctx) {
@@ -20957,12 +20950,12 @@ static size_t llama_state_set_data_internal(struct llama_context * ctx, llama_da
 // Sets the state reading from the specified source address
 size_t llama_state_set_data(struct llama_context * ctx, const uint8_t * src, size_t size) {
     llama_data_read_buffer data_ctx(src, size);
-    try {
+    //try {
         return llama_state_set_data_internal(ctx, data_ctx);
-    } catch (const std::exception & err) {
+    /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: error loading state: %s\n", __func__, err.what());
         return 0;
-    }
+    }*/
 }
 
 static bool llama_state_load_file_internal(struct llama_context * ctx, const char * path_session, llama_token * tokens_out, size_t n_token_capacity, size_t * n_token_count_out) {
@@ -21008,12 +21001,12 @@ static bool llama_state_load_file_internal(struct llama_context * ctx, const cha
 }
 
 bool llama_state_load_file(struct llama_context * ctx, const char * path_session, llama_token * tokens_out, size_t n_token_capacity, size_t * n_token_count_out) {
-    try {
+    //try {
         return llama_state_load_file_internal(ctx, path_session, tokens_out, n_token_capacity, n_token_count_out);
-    } catch (const std::exception & err) {
+    /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: error loading session file: %s\n", __func__, err.what());
         return false;
-    }
+    }*/
 }
 
 static bool llama_state_save_file_internal(struct llama_context * ctx, const char * path_session, const llama_token * tokens, size_t n_token_count) {
@@ -21034,12 +21027,12 @@ static bool llama_state_save_file_internal(struct llama_context * ctx, const cha
 }
 
 bool llama_state_save_file(struct llama_context * ctx, const char * path_session, const llama_token * tokens, size_t n_token_count) {
-    try {
+    //try {
         return llama_state_save_file_internal(ctx, path_session, tokens, n_token_count);
-    } catch (const std::exception & err) {
+    /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: error saving session file: %s\n", __func__, err.what());
         return false;
-    }
+    }*/
 }
 
 static size_t llama_state_seq_get_data_internal(struct llama_context * ctx, llama_data_write & data_ctx, llama_seq_id seq_id) {
@@ -21057,12 +21050,12 @@ size_t llama_state_seq_get_size(struct llama_context * ctx, llama_seq_id seq_id)
 
 size_t llama_state_seq_get_data(struct llama_context * ctx, uint8_t * dst, size_t size, llama_seq_id seq_id) {
     llama_data_write_buffer data_ctx(dst, size);
-    try {
+    //try {
         return llama_state_seq_get_data_internal(ctx, data_ctx, seq_id);
-    } catch (const std::exception & err) {
+    /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: error saving sequence state: %s\n", __func__, err.what());
         return 0;
-    }
+    }*/
 }
 
 static size_t llama_state_seq_set_data_internal(struct llama_context * ctx, llama_data_read & data_ctx, llama_seq_id dest_seq_id) {
@@ -21075,12 +21068,12 @@ static size_t llama_state_seq_set_data_internal(struct llama_context * ctx, llam
 
 size_t llama_state_seq_set_data(struct llama_context * ctx, const uint8_t * src, size_t size, llama_seq_id dest_seq_id) {
     llama_data_read_buffer data_ctx(src, size);
-    try {
+    //try {
         return llama_state_seq_set_data_internal(ctx, data_ctx, dest_seq_id);
-    } catch (const std::exception & err) {
+    /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: error loading sequence state: %s\n", __func__, err.what());
         return 0;
-    }
+    }*/
 }
 
 static size_t llama_state_seq_save_file_internal(struct llama_context * ctx, const char * filepath, llama_seq_id seq_id, const llama_token * tokens, size_t n_token_count) {
@@ -21146,21 +21139,21 @@ static size_t llama_state_seq_load_file_internal(struct llama_context * ctx, con
 }
 
 size_t llama_state_seq_save_file(struct llama_context * ctx, const char * filepath, llama_seq_id seq_id, const llama_token * tokens, size_t n_token_count) {
-    try {
+    //try {
         return llama_state_seq_save_file_internal(ctx, filepath, seq_id, tokens, n_token_count);
-    } catch (const std::exception & err) {
+    /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: error saving sequence state file: %s\n", __func__, err.what());
         return 0;
-    }
+    }*/
 }
 
 size_t llama_state_seq_load_file(struct llama_context * ctx, const char * filepath, llama_seq_id dest_seq_id, llama_token * tokens_out, size_t n_token_capacity, size_t * n_token_count_out) {
-    try {
+    //try {
         return llama_state_seq_load_file_internal(ctx, filepath, dest_seq_id, tokens_out, n_token_capacity, n_token_count_out);
-    } catch (const std::exception & err) {
+    /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: error loading sequence state file: %s\n", __func__, err.what());
         return 0;
-    }
+    }*/
 }
 
 void llama_set_n_threads(struct llama_context * ctx, int32_t n_threads, int32_t n_threads_batch) {
@@ -21321,39 +21314,39 @@ float * llama_get_logits_ith(struct llama_context * ctx, int32_t i) {
     int32_t j = -1;
     llama_synchronize(ctx);
 
-    try {
+    //try {
         if (ctx->logits == nullptr) {
-            throw std::runtime_error("no logits");
+            IC_API::trap("no logits");
         }
 
         if (i < 0) {
             j = ctx->n_outputs + i;
             if (j < 0) {
-                throw std::runtime_error(format("negative index out of range [0, %d)", ctx->n_outputs));
+                IC_API::trap(format("negative index out of range [0, %d)", ctx->n_outputs));
             }
         } else if ((size_t) i >= ctx->output_ids.size()) {
-            throw std::runtime_error(format("out of range [0, %lu)", ctx->output_ids.size()));
+            IC_API::trap(format("out of range [0, %lu)", ctx->output_ids.size()));
         } else {
             j = ctx->output_ids[i];
         }
 
         if (j < 0) {
-            throw std::runtime_error(format("batch.logits[%d] != true", i));
+            IC_API::trap(format("batch.logits[%d] != true", i));
         }
         if (j >= ctx->n_outputs) {
             // This should not happen
-            throw std::runtime_error(format("corrupt output buffer (j=%d, n_outputs=%d)", j, ctx->n_outputs));
+            IC_API::trap(format("corrupt output buffer (j=%d, n_outputs=%d)", j, ctx->n_outputs));
         }
 
         return ctx->logits + j*ctx->model.hparams.n_vocab;
-    } catch (const std::exception & err) {
+  /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: invalid logits id %d, reason: %s\n", __func__, i, err.what());
 #ifndef NDEBUG
         GGML_ABORT("fatal error");
 #else
         return nullptr;
 #endif
-    }
+    }*/
 }
 
 float * llama_get_embeddings(struct llama_context * ctx) {
@@ -21371,39 +21364,39 @@ float * llama_get_embeddings_ith(struct llama_context * ctx, int32_t i) {
 
     llama_synchronize(ctx);
 
-    try {
+    //try {
         if (ctx->embd == nullptr) {
-            throw std::runtime_error("no embeddings");
+            IC_API::trap("no embeddings");
         }
 
         if (i < 0) {
             j = ctx->n_outputs + i;
             if (j < 0) {
-                throw std::runtime_error(format("negative index out of range [0, %d)", ctx->n_outputs));
+                IC_API::trap(format("negative index out of range [0, %d)", ctx->n_outputs));
             }
         } else if ((size_t) i >= ctx->output_ids.size()) {
-            throw std::runtime_error(format("out of range [0, %lu)", ctx->output_ids.size()));
+            IC_API::trap(format("out of range [0, %lu)", ctx->output_ids.size()));
         } else {
             j = ctx->output_ids[i];
         }
 
         if (j < 0) {
-            throw std::runtime_error(format("batch.logits[%d] != true", i));
+            IC_API::trap(format("batch.logits[%d] != true", i));
         }
         if (j >= ctx->n_outputs) {
             // This should not happen
-            throw std::runtime_error(format("corrupt output buffer (j=%d, n_outputs=%d)", j, ctx->n_outputs));
+            IC_API::trap(format("corrupt output buffer (j=%d, n_outputs=%d)", j, ctx->n_outputs));
         }
 
         return ctx->embd + j*ctx->model.hparams.n_embd;
-    } catch (const std::exception & err) {
+    /* } catch (const std::exception& err) {
         LLAMA_LOG_ERROR("%s: invalid embeddings id %d, reason: %s\n", __func__, i, err.what());
 #ifndef NDEBUG
         GGML_ABORT("fatal error");
 #else
         return nullptr;
 #endif
-    }
+    }*/
 }
 
 float * llama_get_embeddings_seq(struct llama_context * ctx, llama_seq_id seq_id) {

@@ -3,11 +3,14 @@
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
-#include <mutex>
+//#include <mutex>
 #include <sstream>
-#include <thread>
+//#include <thread>
 #include <vector>
+#include <filesystem>
 
+
+#include <iostream>
 int common_log_verbosity_thold = LOG_DEFAULT_LLAMA;
 
 void common_log_set_verbosity_thold(int verbosity) {
@@ -66,8 +69,8 @@ struct common_log_entry {
     // signals the worker thread to stop
     bool is_end;
 
-    void print(FILE * file = nullptr) const {
-        FILE * fcur = file;
+    void print(FILE* file = nullptr) const {
+        FILE* fcur = file;
         if (!fcur) {
             // stderr displays DBG messages only when their verbosity level is not higher than the threshold
             // these messages will still be logged to a file
@@ -86,21 +89,21 @@ struct common_log_entry {
             if (timestamp) {
                 // [M.s.ms.us]
                 fprintf(fcur, "%s%d.%02d.%03d.%03d%s ",
-                        g_col[COMMON_LOG_COL_BLUE],
-                        (int) (timestamp / 1000000 / 60),
-                        (int) (timestamp / 1000000 % 60),
-                        (int) (timestamp / 1000 % 1000),
-                        (int) (timestamp % 1000),
-                        g_col[COMMON_LOG_COL_DEFAULT]);
+                    g_col[COMMON_LOG_COL_BLUE],
+                    (int)(timestamp / 1000000 / 60),
+                    (int)(timestamp / 1000000 % 60),
+                    (int)(timestamp / 1000 % 1000),
+                    (int)(timestamp % 1000),
+                    g_col[COMMON_LOG_COL_DEFAULT]);
             }
 
             switch (level) {
-                case GGML_LOG_LEVEL_INFO:  fprintf(fcur, "%sI %s", g_col[COMMON_LOG_COL_GREEN],   g_col[COMMON_LOG_COL_DEFAULT]); break;
-                case GGML_LOG_LEVEL_WARN:  fprintf(fcur, "%sW %s", g_col[COMMON_LOG_COL_MAGENTA], ""                        ); break;
-                case GGML_LOG_LEVEL_ERROR: fprintf(fcur, "%sE %s", g_col[COMMON_LOG_COL_RED],     ""                        ); break;
-                case GGML_LOG_LEVEL_DEBUG: fprintf(fcur, "%sD %s", g_col[COMMON_LOG_COL_YELLOW],  ""                        ); break;
-                default:
-                    break;
+            case GGML_LOG_LEVEL_INFO:  fprintf(fcur, "%sI %s", g_col[COMMON_LOG_COL_GREEN], g_col[COMMON_LOG_COL_DEFAULT]); break;
+            case GGML_LOG_LEVEL_WARN:  fprintf(fcur, "%sW %s", g_col[COMMON_LOG_COL_MAGENTA], ""); break;
+            case GGML_LOG_LEVEL_ERROR: fprintf(fcur, "%sE %s", g_col[COMMON_LOG_COL_RED], ""); break;
+            case GGML_LOG_LEVEL_DEBUG: fprintf(fcur, "%sD %s", g_col[COMMON_LOG_COL_YELLOW], ""); break;
+            default:
+                break;
             }
         }
 
@@ -122,12 +125,13 @@ struct common_log {
         file = nullptr;
         prefix = false;
         timestamps = false;
-        running = false;
+        //icpp-no-thread - in single thread, it is always running
+        // running = false;
         t_start = t_us();
 
         // initial message size - will be expanded if longer messages arrive
         entries.resize(capacity);
-        for (auto & entry : entries) {
+        for (auto& entry : entries) {
             entry.msg.resize(256);
         }
 
@@ -145,15 +149,19 @@ struct common_log {
     }
 
 private:
-    std::mutex mtx;
-    std::thread thrd;
-    std::condition_variable cv;
+    // ICPP-PATCH-START
+    std::string file_path;
+    // ICPP-PATCH-END
+    //icpp-no-thread std::mutex mtx;
+    //icpp-no-thread std::thread thrd;
+    //icpp-no-thread std::condition_variable cv;
 
-    FILE * file;
+    FILE* file;
 
     bool prefix;
     bool timestamps;
     bool running;
+    // bool running;
 
     int64_t t_start;
 
@@ -166,15 +174,16 @@ private:
     common_log_entry cur;
 
 public:
-    void add(enum ggml_log_level level, const char * fmt, va_list args) {
-        std::lock_guard<std::mutex> lock(mtx);
+    void add(enum ggml_log_level level, const char* fmt, va_list args) {
+        //icpp-no-thread std::lock_guard<std::mutex> lock(mtx);
 
         if (!running) {
             // discard messages while the worker thread is paused
             return;
         }
+        // }
 
-        auto & entry = entries[tail];
+        auto& entry = entries[tail];
 
         {
             // cannot use args twice, so make a copy in case we need to expand the buffer
@@ -219,14 +228,14 @@ public:
         tail = (tail + 1) % entries.size();
         if (tail == head) {
             // expand the buffer
-            std::vector<common_log_entry> new_entries(2*entries.size());
+            std::vector<common_log_entry> new_entries(2 * entries.size());
 
             size_t new_tail = 0;
 
             do {
                 new_entries[new_tail] = std::move(entries[head]);
 
-                head     = (head     + 1) % entries.size();
+                head = (head + 1) % entries.size();
                 new_tail = (new_tail + 1);
             } while (head != tail);
 
@@ -240,162 +249,260 @@ public:
             entries = std::move(new_entries);
         }
 
-        cv.notify_one();
+        //icpp-no-thread cv.notify_one();
     }
 
+    //icpp-no-thread rewritten for single threaded execution
+    // Split into resume() and resume_print()
     void resume() {
-        std::lock_guard<std::mutex> lock(mtx);
+        // just activate logging again if paused
+        running = true;
+    }
 
-        if (running) {
+    void resume_printit() {
+        // don't print anything if paused
+        if (!running) {
             return;
         }
+        while (head != tail) {
+            cur = entries[head];
+            head = (head + 1) % entries.size();
 
-        running = true;
-
-        thrd = std::thread([this]() {
-            while (true) {
-                {
-                    std::unique_lock<std::mutex> lock(mtx);
-                    cv.wait(lock, [this]() { return head != tail; });
-
-                    cur = entries[head];
-
-                    head = (head + 1) % entries.size();
-                }
-
-                if (cur.is_end) {
-                    break;
-                }
-
-                cur.print(); // stdout and stderr
-
-                if (file) {
-                    cur.print(file);
-                }
-            }
-        });
-    }
-
-    void pause() {
-        {
-            std::lock_guard<std::mutex> lock(mtx);
-
-            if (!running) {
-                return;
+            if (cur.is_end) {
+                //icpp-no-thread - in single thread, it is always running
+                // running = false;
+                break;
             }
 
-            running = false;
-
-            // push an entry to signal the worker thread to stop
-            {
-                auto & entry = entries[tail];
-                entry.is_end = true;
-
-                tail = (tail + 1) % entries.size();
+            cur.print(); // Print to stdout and stderr
+            if (file) {
+                cur.print(file);
             }
-
-            cv.notify_one();
         }
-
-        thrd.join();
     }
+    // void resume() {
+    //     std::lock_guard<std::mutex> lock(mtx);
 
-    void set_file(const char * path) {
-        pause();
+    //     if (running) {
+    //         return;
+    //     }
+
+    //     running = true;
+
+    //     thrd = std::thread([this]() {
+    //         while (true) {
+    //             {
+    //                 std::unique_lock<std::mutex> lock(mtx);
+    //                 cv.wait(lock, [this]() { return head != tail; });
+
+    //                 cur = entries[head];
+
+    //                 head = (head + 1) % entries.size();
+    //             }
+
+    //             if (cur.is_end) {
+    //                 break;
+    //             }
+
+    //             cur.print(); // stdout and stderr
+
+    //             if (file) {
+    //                 cur.print(file);
+    //             }
+    //         }
+    //     });
+    // }
+
+    //icpp-no-thread rewritten for single threaded execution
+    // NOTE: Do not remove it, becuase '--log-disable' command line option uses this capability
+    void pause() {
+        if (!running) {
+            return;
+        }
+        // }
+
+        running = false;
+
+        // Push an entry to signal stopping
+        auto& entry = entries[tail];
+        entry.is_end = true;
+
+        tail = (tail + 1) % entries.size();
+    }
+    // void pause() {
+    //     {
+    //         std::lock_guard<std::mutex> lock(mtx);
+
+    //         if (!running) {
+    //             return;
+    //         }
+
+    //         running = false;
+
+    //         // push an entry to signal the worker thread to stop
+    //         {
+    //             auto & entry = entries[tail];
+    //             entry.is_end = true;
+
+    //             tail = (tail + 1) % entries.size();
+    //         }
+
+    //         cv.notify_one();
+    //     }
+
+    //     thrd.join();
+    // }
+
+
+    void set_file(const char* path) {
+        // ICPP-PATCH we keep pause and resume setting as is
+        // pause();
 
         if (file) {
             fclose(file);
         }
 
         if (path) {
+            // ICPP-PATCH-START
+            file_path = path;
+            // ICPP-PATCH-END
             file = fopen(path, "w");
-        } else {
+        }
+        else {
+            // ICPP-PATCH-START
+            file_path = "";
+            // ICPP-PATCH-END
             file = nullptr;
         }
 
-        resume();
+        // ICPP-PATCH we keep pause and resume setting as is
+        // resume();
     }
 
     void set_colors(bool colors) {
-        pause();
+        // ICPP-PATCH we keep pause and resume setting as is
+        // pause();
 
         if (colors) {
             g_col[COMMON_LOG_COL_DEFAULT] = LOG_COL_DEFAULT;
-            g_col[COMMON_LOG_COL_BOLD]    = LOG_COL_BOLD;
-            g_col[COMMON_LOG_COL_RED]     = LOG_COL_RED;
-            g_col[COMMON_LOG_COL_GREEN]   = LOG_COL_GREEN;
-            g_col[COMMON_LOG_COL_YELLOW]  = LOG_COL_YELLOW;
-            g_col[COMMON_LOG_COL_BLUE]    = LOG_COL_BLUE;
+            g_col[COMMON_LOG_COL_BOLD] = LOG_COL_BOLD;
+            g_col[COMMON_LOG_COL_RED] = LOG_COL_RED;
+            g_col[COMMON_LOG_COL_GREEN] = LOG_COL_GREEN;
+            g_col[COMMON_LOG_COL_YELLOW] = LOG_COL_YELLOW;
+            g_col[COMMON_LOG_COL_BLUE] = LOG_COL_BLUE;
             g_col[COMMON_LOG_COL_MAGENTA] = LOG_COL_MAGENTA;
-            g_col[COMMON_LOG_COL_CYAN]    = LOG_COL_CYAN;
-            g_col[COMMON_LOG_COL_WHITE]   = LOG_COL_WHITE;
-        } else {
+            g_col[COMMON_LOG_COL_CYAN] = LOG_COL_CYAN;
+            g_col[COMMON_LOG_COL_WHITE] = LOG_COL_WHITE;
+        }
+        else {
             for (size_t i = 0; i < g_col.size(); i++) {
                 g_col[i] = "";
             }
         }
 
-        resume();
+        // ICPP-PATCH we keep pause and resume setting as is
+        // resume();
     }
 
     void set_prefix(bool prefix) {
-        std::lock_guard<std::mutex> lock(mtx);
+        //icpp-no-thread std::lock_guard<std::mutex> lock(mtx);
 
         this->prefix = prefix;
     }
 
     void set_timestamps(bool timestamps) {
-        std::lock_guard<std::mutex> lock(mtx);
+        //icpp-no-thread std::lock_guard<std::mutex> lock(mtx);
 
         this->timestamps = timestamps;
     }
+
+    // ICPP-PATCH-START
+    bool remove_file(std::string& msg) {
+        bool success = true;
+        if (file) {
+            fclose(file);
+            file = nullptr;
+        }
+        if (!file_path.empty()) {
+            if (std::filesystem::exists(file_path)) {
+                success = std::filesystem::remove(file_path);
+                if (success) {
+                    msg = "Successfully removed log file: " + file_path;
+                }
+                else {
+                    msg = "Failed to remove log file: " + file_path;
+                }
+            }
+            else {
+                msg = "Nothing to remove, log file does not exist: " + file_path;
+            }
+            file_path = "";
+        }
+        else {
+            msg = "No log file to remove.";
+        }
+        return success;
+    }
+    // ICPP-PATCH-END
 };
 
 //
 // public API
 //
 
-struct common_log * common_log_init() {
+struct common_log* common_log_init() {
     return new common_log;
 }
 
-struct common_log * common_log_main() {
+struct common_log* common_log_main() {
     static struct common_log log;
 
     return &log;
 }
 
-void common_log_pause(struct common_log * log) {
+void common_log_pause(struct common_log* log) {
     log->pause();
 }
 
-void common_log_resume(struct common_log * log) {
+void common_log_resume(struct common_log* log) {
     log->resume();
 }
 
-void common_log_free(struct common_log * log) {
+void common_log_free(struct common_log* log) {
     delete log;
 }
 
-void common_log_add(struct common_log * log, enum ggml_log_level level, const char * fmt, ...) {
+void common_log_add(struct common_log* log, enum ggml_log_level level, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     log->add(level, fmt, args);
+    //icpp-no-thread - start
+    // in our single thread case, we also call log->resume_printit() here,
+    // which does the actual output of the log message
+    log->resume_printit();
+    //icpp-no-thread - end
     va_end(args);
 }
 
-void common_log_set_file(struct common_log * log, const char * file) {
+void common_log_set_file(struct common_log* log, const char* file) {
     log->set_file(file);
 }
 
-void common_log_set_colors(struct common_log * log, bool colors) {
+void common_log_set_colors(struct common_log* log, bool colors) {
     log->set_colors(colors);
 }
 
-void common_log_set_prefix(struct common_log * log, bool prefix) {
+void common_log_set_prefix(struct common_log* log, bool prefix) {
     log->set_prefix(prefix);
 }
 
-void common_log_set_timestamps(struct common_log * log, bool timestamps) {
+void common_log_set_timestamps(struct common_log* log, bool timestamps) {
     log->set_timestamps(timestamps);
 }
+
+// ICPP-PATCH-START
+// We need to add a public function to remove the log file from the canister
+bool common_log_remove_file(struct common_log* log, std::string& msg) {
+    return log->remove_file(msg);
+}
+// ICPP-PATCH-END

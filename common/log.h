@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ggml.h" // for ggml_log_level
-
+#include <string>
 #ifndef __GNUC__
 #    define LOG_ATTRIBUTE_FORMAT(...)
 #elif defined(__MINGW32__)
@@ -28,6 +28,8 @@ struct common_log * common_log_main(); // singleton, automatically destroys itse
 void                common_log_pause (struct common_log * log); // pause  the worker thread, not thread-safe
 void                common_log_resume(struct common_log * log); // resume the worker thread, not thread-safe
 void                common_log_free  (struct common_log * log);
+
+bool                common_log_remove_file(struct common_log* log, std::string& msg);
 
 LOG_ATTRIBUTE_FORMAT(3, 4)
 void common_log_add(struct common_log * log, enum ggml_log_level level, const char * fmt, ...);

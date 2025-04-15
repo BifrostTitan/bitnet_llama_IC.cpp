@@ -1,6 +1,8 @@
 #if defined(_MSC_VER)
 #define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
 #endif
+#include "ic_api.h"
+extern llama_model** g_model;
 
 #include "common.h"
 #include "log.h"
@@ -24,7 +26,7 @@
 #include <regex>
 #include <sstream>
 #include <string>
-#include <thread>
+//#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -76,7 +78,7 @@ using json = nlohmann::ordered_json;
 //
 
 int32_t cpu_get_num_physical_cores() {
-#ifdef __linux__
+/*#ifdef __linux__
     // enumerate the set of thread siblings, num entries is num cores
     std::unordered_set<std::string> siblings;
     for (uint32_t cpu=0; cpu < UINT32_MAX; ++cpu) {
@@ -134,9 +136,12 @@ int32_t cpu_get_num_physical_cores() {
     return num_physical_cores > 0 ? num_physical_cores : default_threads;
 #endif
     unsigned int n_threads = std::thread::hardware_concurrency();
+    */
+    unsigned int n_threads = 1;
     return n_threads > 0 ? (n_threads <= 4 ? n_threads : n_threads / 2) : 4;
 }
 
+/*
 #if defined(__x86_64__) && defined(__linux__) && !defined(__ANDROID__)
 #include <pthread.h>
 
@@ -186,11 +191,12 @@ static int cpu_count_math_cpus(int n_cpu) {
 }
 
 #endif // __x86_64__ && __linux__
-
+*/
 /**
  * Returns number of CPUs on system that are useful for math.
  */
 int32_t cpu_get_num_math() {
+    /*
 #if defined(__x86_64__) && defined(__linux__) && !defined(__ANDROID__)
     int n_cpu = sysconf(_SC_NPROCESSORS_ONLN);
     if (n_cpu < 1) {
@@ -208,12 +214,14 @@ int32_t cpu_get_num_math() {
     }
 #endif
     return cpu_get_num_physical_cores();
+    */
+    return 1;
 }
 
 // Helper for setting process priority
 
-#if defined(_WIN32)
-
+//#if defined(_WIN32)
+/*
 bool set_process_priority(enum ggml_sched_priority prio) {
     if (prio == GGML_SCHED_PRIO_NORMAL) {
         return true;
@@ -233,9 +241,9 @@ bool set_process_priority(enum ggml_sched_priority prio) {
     }
 
     return true;
-}
+}*/
 
-#else // MacOS and POSIX
+/*#else // MacOS and POSIX
 #include <sys/types.h>
 #include <sys/resource.h>
 
@@ -260,7 +268,7 @@ bool set_process_priority(enum ggml_sched_priority prio) {
 }
 
 #endif
-
+*/
 //
 // CLI argument parsing
 //
@@ -391,7 +399,7 @@ std::string common_params_get_system_info(const common_params & params) {
     DWORD logicalProcessorCount = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
     os << " / " << logicalProcessorCount << " | " << llama_print_system_info();
 #else
-    os << " / " << std::thread::hardware_concurrency() << " | " << llama_print_system_info();
+    //os << " / " << std::thread::hardware_concurrency() << " | " << llama_print_system_info();
 #endif
 
     return os.str();
@@ -664,7 +672,7 @@ bool fs_validate_filename(const std::string & filename) {
     }
 
     std::u32string filename_utf32;
-    try {
+    //try {
         std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
         filename_utf32 = converter.from_bytes(filename);
 
@@ -674,9 +682,9 @@ bool fs_validate_filename(const std::string & filename) {
         if (filename_reencoded != filename) {
             return false;
         }
-    } catch (const std::exception &) {
+    /*} catch (const std::exception&) {
         return false;
-    }
+    }*/
 
     // Check for forbidden codepoints:
     // - Control characters
@@ -801,7 +809,7 @@ std::string fs_get_cache_directory() {
         }
         return p;
     };
-    if (getenv("LLAMA_CACHE")) {
+  /* if (getenv("LLAMA_CACHE")) {
         cache_directory = std::getenv("LLAMA_CACHE");
     } else {
 #ifdef __linux__
@@ -815,9 +823,10 @@ std::string fs_get_cache_directory() {
 #elif defined(_WIN32)
         cache_directory = std::getenv("LOCALAPPDATA");
 #endif // __linux__
+*/
         cache_directory = ensure_trailing_slash(cache_directory);
         cache_directory += "llama.cpp";
-    }
+    //}
     return ensure_trailing_slash(cache_directory);
 }
 
@@ -826,7 +835,7 @@ std::string fs_get_cache_file(const std::string & filename) {
     std::string cache_directory = fs_get_cache_directory();
     const bool success = fs_create_directory_with_parents(cache_directory);
     if (!success) {
-        throw std::runtime_error("failed to create cache directory: " + cache_directory);
+        IC_API::trap("failed to create cache directory: " + cache_directory);
     }
     return cache_directory + filename;
 }
@@ -840,14 +849,29 @@ struct common_init_result common_init_from_params(common_params & params) {
     auto mparams = common_model_params_to_llama(params);
 
     llama_model * model = nullptr;
+    // ICPP-PATCH-START
+      // Skip loading the model if the --model parameter is not provided
+    if (!params.model.empty()) {
+        // ICPP-PATCH-END
 
-    if (!params.hf_repo.empty() && !params.hf_file.empty()) {
-        model = common_load_model_from_hf(params.hf_repo.c_str(), params.hf_file.c_str(), params.model.c_str(), params.hf_token.c_str(), mparams);
-    } else if (!params.model_url.empty()) {
-        model = common_load_model_from_url(params.model_url.c_str(), params.model.c_str(), params.hf_token.c_str(), mparams);
-    } else {
-        model = llama_load_model_from_file(params.model.c_str(), mparams);
+        if (!params.hf_repo.empty() && !params.hf_file.empty()) {
+            model = common_load_model_from_hf(params.hf_repo, params.hf_file, params.model, params.hf_token, mparams);
+        }
+        else if (!params.model_url.empty()) {
+            model = common_load_model_from_url(params.model_url, params.model, params.hf_token, mparams);
+        }
+        else {
+            model = llama_model_load_from_file(params.model.c_str(), mparams);
+        }
+
+        // ICPP-PATCH-START
+        // Skip loading the model if the --model parameter is not provided
     }
+    else {
+        // Access the model through g_model and assign it to the local variable
+        model = *g_model;
+    }
+    // ICPP-PATCH-END
 
     if (model == NULL) {
         LOG_ERR("%s: failed to load model '%s'\n", __func__, params.model.c_str());
@@ -1035,7 +1059,7 @@ static ggml_type kv_cache_type_from_str(const std::string & s) {
         return GGML_TYPE_Q5_1;
     }
 
-    throw std::runtime_error("Invalid cache type: " + s);
+    IC_API::trap("Invalid cache type: " + s);
 }
 
 struct llama_context_params common_context_params_to_llama(const common_params & params) {
@@ -1094,7 +1118,7 @@ struct ggml_threadpool_params ggml_threadpool_params_from_cpu_params(const cpu_p
     return tpp;
 }
 
-#ifdef LLAMA_USE_CURL
+/*#ifdef LLAMA_USE_CURL
 
 #define CURL_MAX_RETRY 3
 #define CURL_RETRY_DELAY_SECONDS 2
@@ -1205,7 +1229,7 @@ static bool common_download_file(const std::string & url, const std::string & pa
     common_load_model_from_url_headers headers;
     {
         typedef size_t(*CURLOPT_HEADERFUNCTION_PTR)(char *, size_t, size_t, void *);
-        auto header_callback = [](char * buffer, size_t /*size*/, size_t n_items, void * userdata) -> size_t {
+        auto header_callback = [](char * buffer, size_t /*size*//*, size_t n_items, void * userdata) -> size_t {
             common_load_model_from_url_headers *headers = (common_load_model_from_url_headers *) userdata;
 
             static std::regex header_regex("([^:]+): (.*)\r\n");
@@ -1361,8 +1385,8 @@ struct llama_model * common_load_model_from_url(
     int n_split = 0;
     {
         struct gguf_init_params gguf_params = {
-            /*.no_alloc = */ true,
-            /*.ctx      = */ NULL,
+            true,
+            NULL,
         };
         auto * ctx_gguf = gguf_init_from_file(path_model, gguf_params);
         if (!ctx_gguf) {
@@ -1445,7 +1469,7 @@ struct llama_model * common_load_model_from_hf(
 }
 
 #else
-
+*/
 struct llama_model * common_load_model_from_url(
         const char * /*model_url*/,
         const char * /*path_model*/,
@@ -1465,7 +1489,7 @@ struct llama_model * common_load_model_from_hf(
     return nullptr;
 }
 
-#endif // LLAMA_USE_CURL
+//#endif // LLAMA_USE_CURL
 
 //
 // Batch utils
@@ -1590,7 +1614,7 @@ std::string common_chat_apply_template(const struct llama_model * model,
         if (ptr_tmpl != nullptr) {
             // if the custom "tmpl" is not supported, we throw an error
             // this is a bit redundant (for good), since we're not sure if user validated the custom template with llama_chat_verify_template()
-            throw std::runtime_error("this custom template is not supported");
+            IC_API::trap("this custom template is not supported");
         } else {
             // If the built-in template is not supported, we default to chatml
             res = llama_chat_apply_template(nullptr, "chatml", chat.data(), chat.size(), add_ass, buf.data(), buf.size());
@@ -1808,11 +1832,11 @@ static common_control_vector_data common_control_vector_load_one(const common_co
         // split on '.'
         size_t dotpos = name.find('.');
         if (dotpos != std::string::npos && name.substr(0, dotpos) == "direction") {
-            try {
+           // try {
                 layer_idx = std::stoi(name.substr(dotpos + 1));
-            } catch (...) {
+          /* } catch (...) {
                 layer_idx = -1;
-            }
+            }*/
         }
         if (layer_idx < 0) {
             LOG_ERR("%s: invalid/unparsable direction tensor layer index in %s\n", __func__, load_info.fname.c_str());

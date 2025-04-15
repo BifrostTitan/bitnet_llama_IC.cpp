@@ -38,17 +38,11 @@ bool common_arg::in_example(enum llama_example ex) {
 }
 
 bool common_arg::get_value_from_env(std::string & output) {
-    if (env == nullptr) return false;
-    char * value = std::getenv(env);
-    if (value) {
-        output = value;
-        return true;
-    }
     return false;
 }
 
 bool common_arg::has_value_from_env() {
-    return env != nullptr && std::getenv(env);
+    return false;
 }
 
 static std::vector<std::string> break_str_into_lines(std::string input, size_t max_char_per_line) {
@@ -124,7 +118,7 @@ static void common_params_handle_model_default(common_params & params) {
         // short-hand to avoid specifying --hf-file -> default it to --model
         if (params.hf_file.empty()) {
             if (params.model.empty()) {
-                throw std::invalid_argument("error: --hf-repo requires either --hf-file or --model\n");
+                throw IC_API::trap("error: --hf-repo requires either --hf-file or --model\n");
             }
             params.hf_file = params.model;
         } else if (params.model.empty()) {
@@ -158,7 +152,7 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
     }
 
     // handle environment variables
-    for (auto & opt : ctx_arg.options) {
+   /* for (auto& opt : ctx_arg.options) {
         std::string value;
         if (opt.get_value_from_env(value)) {
             try {
@@ -173,16 +167,16 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
                     continue;
                 }
             } catch (std::exception & e) {
-                throw std::invalid_argument(string_format(
+                throw IC_API::trap(string_format(
                     "error while handling environment variable \"%s\": %s\n\n", opt.env, e.what()));
             }
         }
     }
-
+*/
     // handle command line arguments
     auto check_arg = [&](int i) {
         if (i+1 >= argc) {
-            throw std::invalid_argument("expected value for argument");
+            throw IC_API::trap("expected value for argument");
         }
     };
 
@@ -194,12 +188,12 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
             std::replace(arg.begin(), arg.end(), '_', '-');
         }
         if (arg_to_options.find(arg) == arg_to_options.end()) {
-            throw std::invalid_argument(string_format("error: invalid argument: %s", arg.c_str()));
+            throw IC_API::trap(string_format("error: invalid argument: %s", arg.c_str()));
         }
         auto opt = *arg_to_options[arg];
-        if (opt.has_value_from_env()) {
+       /* if (opt.has_value_from_env()) {
             fprintf(stderr, "warn: %s environment variable is set, but will be overwritten by command line argument %s\n", opt.env, arg.c_str());
-        }
+        }*/
         try {
             if (opt.handler_void) {
                 opt.handler_void(params);
@@ -226,7 +220,7 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
                 continue;
             }
         } catch (std::exception & e) {
-            throw std::invalid_argument(string_format(
+            throw IC_API::trap(string_format(
                 "error while handling argument \"%s\": %s\n\n"
                 "usage:\n%s\n\nto show complete usage, run with -h",
                 arg.c_str(), e.what(), arg_to_options[arg]->to_string().c_str()));
@@ -239,7 +233,7 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
     postprocess_cpu_params(params.draft_cpuparams_batch, &params.cpuparams_batch);
 
     if (params.prompt_cache_all && (params.interactive || params.interactive_first)) {
-        throw std::invalid_argument("error: --prompt-cache-all not supported in interactive mode yet\n");
+        throw IC_API::trap("error: --prompt-cache-all not supported in interactive mode yet\n");
     }
 
     common_params_handle_model_default(params);
@@ -259,7 +253,7 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
     }
 
     if (params.reranking && params.embedding) {
-        throw std::invalid_argument("error: either --embedding or --reranking can be specified, but not both");
+        throw IC_API::trap("error: either --embedding or --reranking can be specified, but not both");
     }
 
     return true;
@@ -310,7 +304,7 @@ bool common_params_parse(int argc, char ** argv, common_params & params, llama_e
             }
             exit(0);
         }
-    } catch (const std::invalid_argument & ex) {
+    } catch (const IC_API::trap & ex) {
         fprintf(stderr, "%s\n", ex.what());
         ctx_arg.params = params_org;
         return false;
@@ -383,46 +377,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params) {
             params.use_color = true;
         }
-    ).set_examples({LLAMA_EXAMPLE_MAIN, LLAMA_EXAMPLE_INFILL, LLAMA_EXAMPLE_SPECULATIVE, LLAMA_EXAMPLE_LOOKUP}));
-    add_opt(common_arg(
-        {"-t", "--threads"}, "N",
-        string_format("number of threads to use during generation (default: %d)", params.cpuparams.n_threads),
-        [](common_params & params, int value) {
-            params.cpuparams.n_threads = value;
-            if (params.cpuparams.n_threads <= 0) {
-                params.cpuparams.n_threads = std::thread::hardware_concurrency();
-            }
-        }
-    ).set_env("LLAMA_ARG_THREADS"));
-    add_opt(common_arg(
-        {"-tb", "--threads-batch"}, "N",
-        "number of threads to use during batch and prompt processing (default: same as --threads)",
-        [](common_params & params, int value) {
-            params.cpuparams_batch.n_threads = value;
-            if (params.cpuparams_batch.n_threads <= 0) {
-                params.cpuparams_batch.n_threads = std::thread::hardware_concurrency();
-            }
-        }
-    ));
-    add_opt(common_arg(
-        {"-td", "--threads-draft"}, "N",
-        "number of threads to use during generation (default: same as --threads)",
-        [](common_params & params, int value) {
-            params.draft_cpuparams.n_threads = value;
-            if (params.draft_cpuparams.n_threads <= 0) {
-                params.draft_cpuparams.n_threads = std::thread::hardware_concurrency();
-            }
-        }
-    ).set_examples({LLAMA_EXAMPLE_SPECULATIVE}));
-    add_opt(common_arg(
-        {"-tbd", "--threads-batch-draft"}, "N",
-        "number of threads to use during batch and prompt processing (default: same as --threads-draft)",
-        [](common_params & params, int value) {
-            params.draft_cpuparams_batch.n_threads = value;
-            if (params.draft_cpuparams_batch.n_threads <= 0) {
-                params.draft_cpuparams_batch.n_threads = std::thread::hardware_concurrency();
-            }
-        }
     ).set_examples({LLAMA_EXAMPLE_SPECULATIVE}));
     add_opt(common_arg(
         {"-C", "--cpu-mask"}, "M",
@@ -430,7 +384,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & mask) {
             params.cpuparams.mask_valid = true;
             if (!parse_cpu_mask(mask, params.cpuparams.cpumask)) {
-                throw std::invalid_argument("invalid cpumask");
+                throw IC_API::trap("invalid cpumask");
             }
         }
     ));
@@ -440,7 +394,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & range) {
             params.cpuparams.mask_valid = true;
             if (!parse_cpu_range(range, params.cpuparams.cpumask)) {
-                throw std::invalid_argument("invalid range");
+                throw IC_API::trap("invalid range");
             }
         }
     ));
@@ -456,7 +410,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         string_format("set process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: %d)\n", params.cpuparams.priority),
         [](common_params & params, int prio) {
             if (prio < 0 || prio > 3) {
-                throw std::invalid_argument("invalid value");
+                throw IC_API::trap("invalid value");
             }
             params.cpuparams.priority = (enum ggml_sched_priority) prio;
         }
@@ -474,7 +428,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & mask) {
             params.cpuparams_batch.mask_valid = true;
             if (!parse_cpu_mask(mask, params.cpuparams_batch.cpumask)) {
-                throw std::invalid_argument("invalid cpumask");
+                throw IC_API::trap("invalid cpumask");
             }
         }
     ));
@@ -484,7 +438,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & range) {
             params.cpuparams_batch.mask_valid = true;
             if (!parse_cpu_range(range, params.cpuparams_batch.cpumask)) {
-                throw std::invalid_argument("invalid range");
+                throw IC_API::trap("invalid range");
             }
         }
     ));
@@ -500,7 +454,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         string_format("set process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: %d)\n", params.cpuparams_batch.priority),
         [](common_params & params, int prio) {
             if (prio < 0 || prio > 3) {
-                throw std::invalid_argument("invalid value");
+                throw IC_API::trap("invalid value");
             }
             params.cpuparams_batch.priority = (enum ggml_sched_priority) prio;
         }
@@ -518,7 +472,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & mask) {
             params.draft_cpuparams.mask_valid = true;
             if (!parse_cpu_mask(mask, params.draft_cpuparams.cpumask)) {
-                throw std::invalid_argument("invalid cpumask");
+                throw IC_API::trap("invalid cpumask");
             }
         }
     ).set_examples({LLAMA_EXAMPLE_SPECULATIVE}));
@@ -528,7 +482,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & range) {
             params.draft_cpuparams.mask_valid = true;
             if (!parse_cpu_range(range, params.draft_cpuparams.cpumask)) {
-                throw std::invalid_argument("invalid range");
+                throw IC_API::trap("invalid range");
             }
         }
     ).set_examples({LLAMA_EXAMPLE_SPECULATIVE}));
@@ -544,7 +498,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         string_format("set draft process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: %d)\n", params.draft_cpuparams.priority),
         [](common_params & params, int prio) {
             if (prio < 0 || prio > 3) {
-                throw std::invalid_argument("invalid value");
+                throw IC_API::trap("invalid value");
             }
             params.draft_cpuparams.priority = (enum ggml_sched_priority) prio;
         }
@@ -562,7 +516,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & mask) {
             params.draft_cpuparams_batch.mask_valid = true;
             if (!parse_cpu_mask(mask, params.draft_cpuparams_batch.cpumask)) {
-                throw std::invalid_argument("invalid cpumask");
+                throw IC_API::trap("invalid cpumask");
             }
         }
     ).set_examples({LLAMA_EXAMPLE_SPECULATIVE}));
@@ -572,7 +526,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & range) {
             params.draft_cpuparams_batch.mask_valid = true;
             if (!parse_cpu_range(range, params.draft_cpuparams_batch.cpumask)) {
-                throw std::invalid_argument("invalid cpumask");
+                throw IC_API::trap("invalid cpumask");
             }
         }
     ).set_examples({LLAMA_EXAMPLE_SPECULATIVE}));
@@ -588,7 +542,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         string_format("set draft process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: %d)\n", params.draft_cpuparams_batch.priority),
         [](common_params & params, int prio) {
             if (prio < 0 || prio > 3) {
-                throw std::invalid_argument("invalid value");
+                throw IC_API::trap("invalid value");
             }
             params.draft_cpuparams_batch.priority = (enum ggml_sched_priority) prio;
         }
@@ -1034,10 +988,10 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
                     const float bias = std::stof(value_str) * ((sign == '-') ? -1.0f : 1.0f);
                     params.sparams.logit_bias.push_back({key, bias});
                 } else {
-                    throw std::invalid_argument("invalid input format");
+                    throw IC_API::trap("invalid input format");
                 }
             } catch (const std::exception&) {
-                throw std::invalid_argument("invalid input format");
+                throw IC_API::trap("invalid input format");
             }
         }
     ).set_sparam());
@@ -1079,7 +1033,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             else if (value == "cls")  { params.pooling_type = LLAMA_POOLING_TYPE_CLS;  }
             else if (value == "last") { params.pooling_type = LLAMA_POOLING_TYPE_LAST; }
             else if (value == "rank") { params.pooling_type = LLAMA_POOLING_TYPE_RANK; }
-            else { throw std::invalid_argument("invalid value"); }
+            else { throw IC_API::trap("invalid value"); }
         }
     ).set_examples({LLAMA_EXAMPLE_EMBEDDING, LLAMA_EXAMPLE_RETRIEVAL, LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_POOLING"));
     add_opt(common_arg(
@@ -1088,7 +1042,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & value) {
             /**/ if (value == "causal") { params.attention_type = LLAMA_ATTENTION_TYPE_CAUSAL; }
             else if (value == "non-causal") { params.attention_type = LLAMA_ATTENTION_TYPE_NON_CAUSAL; }
-            else { throw std::invalid_argument("invalid value"); }
+            else { throw IC_API::trap("invalid value"); }
         }
     ).set_examples({LLAMA_EXAMPLE_EMBEDDING}));
     add_opt(common_arg(
@@ -1098,7 +1052,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             /**/ if (value == "none") { params.rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_NONE; }
             else if (value == "linear") { params.rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_LINEAR; }
             else if (value == "yarn") { params.rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_YARN; }
-            else { throw std::invalid_argument("invalid value"); }
+            else { throw IC_API::trap("invalid value"); }
         }
     ).set_env("LLAMA_ARG_ROPE_SCALING_TYPE"));
     add_opt(common_arg(
@@ -1362,7 +1316,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             /**/ if (value == "distribute" || value == "") { params.numa = GGML_NUMA_STRATEGY_DISTRIBUTE; }
             else if (value == "isolate") { params.numa = GGML_NUMA_STRATEGY_ISOLATE; }
             else if (value == "numactl") { params.numa = GGML_NUMA_STRATEGY_NUMACTL; }
-            else { throw std::invalid_argument("invalid value"); }
+            else { throw IC_API::trap("invalid value"); }
         }
     ).set_env("LLAMA_ARG_NUMA"));
     add_opt(common_arg(
@@ -1406,7 +1360,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
 #endif // GGML_USE_SYCL
                 params.split_mode = LLAMA_SPLIT_MODE_ROW;
             } else {
-                throw std::invalid_argument("invalid value");
+                throw IC_API::trap("invalid value");
             }
             if (!llama_supports_gpu_offload()) {
                 fprintf(stderr, "warning: llama.cpp was compiled without support for GPU offload. Setting the split mode has no effect.\n");
@@ -1424,7 +1378,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             std::sregex_token_iterator it{ arg_next.begin(), arg_next.end(), regex, -1 };
             std::vector<std::string> split_arg{ it, {} };
             if (split_arg.size() >= llama_max_devices()) {
-                throw std::invalid_argument(
+                throw IC_API::trap(
                     string_format("got %d input configs, but system only has %d devices", (int)split_arg.size(), (int)llama_max_devices())
                 );
             }
@@ -1916,7 +1870,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & value) {
             /**/ if (value == "pca") { params.cvector_dimre_method = DIMRE_METHOD_PCA; }
             else if (value == "mean") { params.cvector_dimre_method = DIMRE_METHOD_MEAN; }
-            else { throw std::invalid_argument("invalid value"); }
+            else { throw IC_API::trap("invalid value"); }
         }
     ).set_examples({LLAMA_EXAMPLE_CVECTOR_GENERATOR}));
     add_opt(common_arg(
@@ -1925,7 +1879,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & value) {
             /**/ if (value == "jsonl") { params.batched_bench_output_jsonl = true; }
             else if (value == "md") { params.batched_bench_output_jsonl = false; }
-            else { std::invalid_argument("invalid value"); }
+            else { IC_API::trap("invalid value"); }
         }
     ).set_examples({LLAMA_EXAMPLE_BENCH}));
     add_opt(common_arg(
